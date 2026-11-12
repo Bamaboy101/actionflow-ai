@@ -1,0 +1,17 @@
+[
+  {
+    "id": "sample-1",
+    "title": "Interview invitation",
+    "text": "You are invited to interview for the Product Engineer role on Friday, November 20 at 2:00pm EST. Please bring a photo ID."
+  },
+  {
+    "id": "sample-2",
+    "title": "Library notice",
+    "text": "Your book is due on 11/25/2026. Please return or renew it before the due date to avoid fines."
+  },
+  {
+    "id": "sample-3",
+    "title": "Dentist reminder",
+    "text": "Dentist appointment with Dr. Lee on Tuesday, December 2 at 10:30am. Please arrive 15 minutes early."
+  }
+]
