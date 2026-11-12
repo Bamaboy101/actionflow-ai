@@ -77,7 +77,7 @@ export default function App() {
 
   return (
     <div style={{ fontFamily: 'system-ui, sans-serif', maxWidth: 900, margin: '0 auto', padding: 20 }}>
-      <h1>ActionFlow AI <span style={{ color: '#666', fontSize: 0.6 }}>&bull; demo</span></h1>
+      <h1>ActionFlow AI <span style={{ color: '#666', fontSize: 0.6 }}>• demo</span></h1>
       <p style={{ color: '#555' }}>Paste or upload a notice, review proposed actions, approve, then export locally. Nothing is sent to third parties automatically.</p>
       {error && <span style={{ color: '#dc2626' }}>{error}</span>}
 
@@ -99,7 +99,7 @@ export default function App() {
                 I consent to processing this text locally (no external send)
               </label>
               <button onClick={handleExtract} disabled={loading || !consent || !(selected || inputText)} style={{ padding: '8px 14px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', width: '100%' }}>
-                {loading ? 'Extracting&hellip;' : 'Extract actions'}
+                {loading ? 'Extracting…' : 'Extract actions'}
               </button>
               <p style={{ fontSize: 0.85, color: '#666' }}>Raw text is not persisted or logged by default.</p>
             </div>
@@ -109,7 +109,7 @@ export default function App() {
 
       {step === 'review' && result && (
         <section>
-          <h2>2. Review &amp; approve</h2>
+          <h2>2. Review & approve</h2>
           <p style={{ color: '#555', marginBottom: 12 }}>{result.summary}</p>
           {result.parties.length && <p><b>Parties:</b> {result.parties.join(', ')}</p>}
           {result.requirements.length && <p><b>Requirements:</b> {result.requirements.join('; ')}</p>}
