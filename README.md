@@ -51,7 +51,11 @@ The live dashboard at **https://bamaboy101.github.io/actionflow-ai/** shows:
 - Ambiguity warnings (missing timezone)
 - Approve button and .ics / checklist download
 
-> **Screenshot note:** Browser-based screenshot capture is unavailable in this environment. Visit the live demo above to interact with the dashboard directly.
+## Demo Preview
+
+![Actionflow Dashboard Desktop](./screenshots/desktop.png)
+
+![Actionflow Dashboard Mobile](./screenshots/mobile.png)
 
 ## Features
 
