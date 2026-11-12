@@ -8,63 +8,59 @@
         "responseMode": "lastNode",
         "responseData": "allEntries"
       },
-      "name": "Webhook - Document Ingested",
+      "name": "Document Webhook",
       "type": "n8n-nodes-base.webhook",
-      "typeVersion": 0,
+      "typeVersion": 1,
       "position": [240, 100]
     },
     {
       "parameters": {
-        "assignments": [
-          {
-            "id": "action-items",
-            "name": "Action Items",
-            "type": "string",
-            "value": "={{ $json.text.match(/[^.!?]*(?:please|need|must|bring|attach|provide)[^.!?]*[.!?]?/gi) || [] }}"
-          },
-          {
-            "id": "detected-parties",
-            "name": "Detected Parties",
-            "type": "string",
-            "value": "={{ $json.text.match(/with\\s+([A-Z][a-zA-Z. ]+?)(?:\s+(?:on|at|in|for|to|and|the|a|an)|$)/gi) || [] }}"
-          }
-        ],
-        "options": {}
+        "httpMethod": "POST",
+        "url": "http://localhost:4002/api/extract",
+        "jsonParameters": true,
+        "bodyParametersJson": "{
+          \"source_text\": \"={{ $json.text }}\",
+          \"processing_consent\": true,
+          \"source_type\": \"upload\"
+        }"
       },
-      "name": "Extract Action Items",
-      "type": "n8n-nodes-base.set",
+      "name": "Send to ActionFlow API",
+      "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 1,
-      "position": [440, 100]
+      "position": [460, 100]
     },
     {
       "parameters": {
         "conditions": {
-          "string": [
+          "boolean": [
             {
-              "value1": "={{ $json.detected-parties.length }}",
-              "operation": "greaterThan",
-              "value2": 0
+              "value1": \"={{ $json.actions.length > 0 }}\",
+              "operation": \"equals\",
+              \"value2\": \"true\"
             }
           ]
+        },
+        "options": {
+          "failOnError": false
         }
       },
-      "name": "Parties Detected?",
+      "name": "Has Actions?",
       "type": "n8n-nodes-base.switch",
-      "typeVersion": 0,
+      "typeVersion": 1,
       "position": [640, 100]
     },
     {
       "parameters": {
         "to": "reviewer@example.com",
-        "subject": "ActionFlow AI: New Document Requires Review",
-        "text": "A new document has been extracted for review.\\n\\nActions identified: {{ $json.action-items }}\\nParties: {{ $json.detected-parties }}\\n\\nPlease review in the ActionFlow dashboard."
+        "subject": "ActionFlow AI: New Actions Require Review",
+        "text": "New document processed:\\n\\nSummary: {{ $json.summary }}\\nActions: {{ $json.actions.length }}\\nParties: {{ $json.parties.join(', ') }}\\n\\nPlease review in ActionFlow dashboard."
       },
       "name": "Notify Reviewer",
       "type": "n8n-nodes-base.sendEmail",
       "typeVersion": 1,
       "position": [840, 100],
       "credentials": {
-        "smtp": "SMTP Credentials"
+        "smtp": "smtp-credentials"
       }
     },
     {
@@ -72,52 +68,49 @@
         "httpMethod": "POST",
         "url": "https://api.openrouter.ai/v1/chat/completions",
         "jsonParameters": true,
-        "options": {
-          "bodyContentType": "json"
-        },
-        "bodyParametersJson": {
-          "model": "openrouter/auto",
-          "messages": [
+        "bodyParametersJson": "{
+          \"model\": \"openrouter/auto\",
+          \"messages\": [
             {
-              "role": "user",
-              "content": "Summarize the following action items: {{ $json.action-items }}"
+              \"role\": \"user\",
+              \"content\": \"Summarize and extract key dates from: {{ $json.actions }}\"
             }
           ]
-        }
+        }"
       },
-      "name": "Summarize with LLM",
+      "name": "AI Summarization",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 1,
-      "position": [840, 300],
+      "position": [840, -100],
       "credentials": {
-        "headerAuth": "OpenRouter API"
+        "headerAuth": "openrouter-api-key"
       }
     }
   ],
   "connections": {
-    "Webhook - Document Ingested": {
+    "Document Webhook": {
       "main": [
         [
           {
-            "node": "Extract Action Items",
+            "node": "Send to ActionFlow API",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Extract Action Items": {
+    "Send to ActionFlow API": {
       "main": [
         [
           {
-            "node": "Parties Detected?",
+            "node": "Has Actions?",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Parties Detected?": {
+    "Has Actions?": {
       "main": [
         [
           {
@@ -128,7 +121,7 @@
         ],
         [
           {
-            "node": "Summarize with LLM",
+            "node": "AI Summarization",
             "type": "main",
             "index": 0
           }
@@ -140,7 +133,7 @@
   "settings": {},
   "versionId": "1",
   "triggerCount": 0,
-  "updatedAt": "2026-11-12T19:00:00Z",
-  "createdAt": "2026-11-12T19:00:00Z",
+  "updatedAt": "2026-11-13T00:00:00Z",
+  "createdAt": "2026-11-12T00:00:00Z",
   "versionId": "1"
 }
