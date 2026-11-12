@@ -3,8 +3,11 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  base: process.env.NODE_ENV === 'production' ? '/actionflow-ai/' : '/',
   server: {
     port: 5175,
-    proxy: { '/api': 'http://localhost:4002' }
+    proxy: {
+      '/api': 'http://localhost:4002'
+    }
   }
 })

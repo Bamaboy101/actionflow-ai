@@ -1,25 +1,21 @@
-import { useState, useEffect } from 'react'
-
-const API = import.meta.env.VITE_API_BASE || ''
+import { useState } from 'react'
 
 type Action = { id: string; title: string; due_utc: string | null; source_span: string | null; timezone: string | null; ambiguity: string | null; status: string }
-type Sample = { id: string; title: string; text: string }
+
+const SAMPLES: { id: string; title: string; text: string }[] = [
+  { id: 'sample-1', title: 'Interview invitation', text: 'You are invited to interview for the Product Engineer role on Friday, November 20 at 2:00pm EST. Please bring a photo ID.' },
+  { id: 'sample-2', title: 'Library notice', text: 'Your book is due on 11/25/2026. Please return or renew it before the due date to avoid fines.' },
+  { id: 'sample-3', title: 'Dentist reminder', text: 'Dentist appointment with Dr. Lee on Tuesday, December 2 at 10:30am. Please arrive 15 minutes early.' }
+]
 
 export default function App() {
   const [step, setStep] = useState<'input' | 'review' | 'export'>('input')
-  const [samples, setSamples] = useState<Sample[]>([])
-  const [selected, setSelected] = useState<Sample | null>(null)
+  const [selected, setSelected] = useState<{ id: string; title: string; text: string } | null>(null)
   const [inputText, setInputText] = useState('')
   const [consent, setConsent] = useState(false)
   const [result, setResult] = useState<any>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-
-  async function loadSamples() {
-    try { setSamples(await (await fetch(`${API}/api/samples`)).json()) } catch {}
-  }
-
-  useEffect(() => { loadSamples() }, [])
 
   async function handleExtract() {
     const text = (selected?.text || inputText).trim()
@@ -27,50 +23,110 @@ export default function App() {
     if (!consent) return setError('Processing consent required')
     setLoading(true); setError(null)
     try {
-      const r = await fetch(`${API}/api/extract`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source_text: text, processing_consent: true, source_type: 'paste' })
-      })
-      setResult(await r.json())
+      const extraction = deterministicExtract(text)
+      setResult(extraction)
       setStep('review')
     } catch (e) { setError(String(e)) }
     finally { setLoading(false) }
   }
 
+  function deterministicExtract(text: string) {
+    const actions: any[] = []
+    const parties: string[] = []
+    const requirements: string[] = []
+
+    const withMatches = text.match(/with\s+([A-Z][a-zA-Z. ]+?)(?:\s+(?:on|at|in|for|to|and|the|a|an)|$)/gi)
+    if (withMatches) {
+      for (const m of withMatches) {
+        const name = m.replace(/with\s+/i, '').replace(/\s+(on|at|in|for|to|and|the|a|an)$/i, '').trim()
+        if (name && !parties.includes(name)) parties.push(name)
+      }
+    }
+
+    let foundSpan = ''
+    const dateRegex = /(?:on|at|in)\s+([A-Z][a-z]+day),\s*([A-Z][a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?/i
+    const m = text.match(dateRegex)
+    if (m) foundSpan = m[0]
+
+    const timeM = text.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i)
+    if (timeM) foundSpan = foundSpan ? foundSpan + ' ' + timeM[0] : timeM[0]
+
+    const tzM = text.match(/\b(UTC|EST|EDT|PST|PDT|GMT|BST|IST|CET|CEST)\b/)
+    const timezone = tzM ? tzM[0] : null
+    const hasDateTime = !!foundSpan
+
+    if (foundSpan) {
+      actions.push({
+        title: `Follow up on: ${foundSpan.slice(0, 60)}${foundSpan.length > 60 ? '…' : ''}`,
+        due_utc: null,
+        source_span: foundSpan,
+        timezone,
+        ambiguity: !timezone && hasDateTime ? 'No timezone specified; please confirm before exporting a calendar entry.' : null
+      })
+    }
+
+    const reqMatches = text.match(/[^.!?]*(?:please|need|must|bring|attach|provide)[^.!?]*[.!?]?/gi)
+    if (reqMatches) {
+      for (const r of reqMatches) {
+        const t = r.trim()
+        if (t.length > 0 && !requirements.includes(t)) requirements.push(t)
+      }
+    }
+
+    return {
+      actions,
+      parties,
+      requirements,
+      summary: actions.length
+        ? `Identified ${actions.length} action item(s)${parties.length ? ` involving ${parties.join(', ')}` : ''}.`
+        : 'No clear action items detected.'
+    }
+  }
+
   async function handleEdit(id: string, field: string, value: string) {
     setLoading(true)
     try {
-      const r = await fetch(`${API}/api/validate`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_id: result.request_id, action_id: id, edits: { [field]: value } })
-      })
-      const data = await r.json()
-      setResult({ ...result, actions: result.actions.map((a: any) => a.id === id ? data.action : a) })
+      setResult({ ...result, actions: result.actions.map((a: any) => a.id === id ? { ...a, [field]: value } : a) })
     } catch (e) { setError(String(e)) }
     finally { setLoading(false) }
   }
 
   async function handleApprove() {
     const ids = result.actions.map((a: any) => a.id)
-    const r = await fetch(`${API}/api/approve`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ request_id: result.request_id, action_ids: ids })
-    })
-    setResult(await r.json())
+    const approved = result.actions.map((a: any) => ({ ...a, approved: true, status: 'approved' }))
+    setResult({ ...result, approved, actions: result.actions.map((a: any) => ({ ...a, approved: true, status: 'approved' })) })
     setStep('export')
   }
 
   async function handleExport(type: 'ics' | 'checklist') {
     const ids = result.approved.map((a: any) => a.id)
-    const r = await fetch(`${API}/api/export`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ request_id: result.request_id, action_ids: ids, output_type: type })
-    })
-    const blob = await r.blob()
+    const approvedActions = result.approved
+    let content = '', filename = ''
+    if (type === 'ics') {
+      filename = 'actionflow.ics'
+      content = [
+        'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//ActionFlow AI//Demo//EN',
+        ...approvedActions.map((a: any) => [
+          'BEGIN:VEVENT', `UID:${a.id}@actionflow.ai`, `DTSTAMP:${new Date().toISOString()}`, `SUMMARY:${a.title}`,
+          a.due_utc ? `DTSTART:${a.due_utc.replace(/[-:]/g, '')}00Z` : '',
+          `DESCRIPTION:Source: ${a.source_span || ''}\\nAmbiguity: ${a.ambiguity || 'none'}`,
+          'END:VEVENT'
+        ].filter(Boolean).join('\n')),
+        'END:VCALENDAR'
+      ].join('\n')
+    } else {
+      filename = 'actionflow.md'
+      content = [
+        '# ActionFlow AI — Approved Task Checklist (demo)',
+        '',
+        ...approvedActions.map(a => `- [ ] ${a.title}` + (a.due_utc ? ` (due ${a.due_utc})` : ''))
+      ].join('\n')
+    }
+    const blob = new Blob([content], { type: type === 'ics' ? 'text/calendar' : 'text/markdown' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = type === 'ics' ? 'actionflow.ics' : 'actionflow.md'
+    a.download = filename
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -87,9 +143,9 @@ export default function App() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             <div>
               <label style={{ display: 'block', marginBottom: 6, fontWeight: 600 }}>Sample notices</label>
-              <select onChange={e => setSelected(samples.find(s => s.id === e.target.value) || null)} style={{ width: '100%', marginBottom: 8 }}>
+              <select onChange={e => setSelected(SAMPLES.find(s => s.id === e.target.value) || null)} style={{ width: '100%', marginBottom: 8 }}>
                 <option value="">Choose a sample</option>
-                {samples.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
+                {SAMPLES.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
               </select>
               <textarea rows={6} value={inputText} onChange={e => setInputText(e.target.value)} style={{ width: '100%', fontFamily: 'monospace', fontSize: 0.9 }} placeholder="Paste a notice, invitation or reminder…"></textarea>
             </div>
