@@ -1,0 +1,146 @@
+{
+  "name": "ActionFlow AI - Document Processing Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "actionflow-extract",
+        "responseMode": "lastNode",
+        "responseData": "allEntries"
+      },
+      "name": "Webhook - Document Ingested",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 0,
+      "position": [240, 100]
+    },
+    {
+      "parameters": {
+        "assignments": [
+          {
+            "id": "action-items",
+            "name": "Action Items",
+            "type": "string",
+            "value": "={{ $json.text.match(/[^.!?]*(?:please|need|must|bring|attach|provide)[^.!?]*[.!?]?/gi) || [] }}"
+          },
+          {
+            "id": "detected-parties",
+            "name": "Detected Parties",
+            "type": "string",
+            "value": "={{ $json.text.match(/with\\s+([A-Z][a-zA-Z. ]+?)(?:\s+(?:on|at|in|for|to|and|the|a|an)|$)/gi) || [] }}"
+          }
+        ],
+        "options": {}
+      },
+      "name": "Extract Action Items",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 1,
+      "position": [440, 100]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.detected-parties.length }}",
+              "operation": "greaterThan",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "name": "Parties Detected?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 0,
+      "position": [640, 100]
+    },
+    {
+      "parameters": {
+        "to": "reviewer@example.com",
+        "subject": "ActionFlow AI: New Document Requires Review",
+        "text": "A new document has been extracted for review.\\n\\nActions identified: {{ $json.action-items }}\\nParties: {{ $json.detected-parties }}\\n\\nPlease review in the ActionFlow dashboard."
+      },
+      "name": "Notify Reviewer",
+      "type": "n8n-nodes-base.sendEmail",
+      "typeVersion": 1,
+      "position": [840, 100],
+      "credentials": {
+        "smtp": "SMTP Credentials"
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "https://api.openrouter.ai/v1/chat/completions",
+        "jsonParameters": true,
+        "options": {
+          "bodyContentType": "json"
+        },
+        "bodyParametersJson": {
+          "model": "openrouter/auto",
+          "messages": [
+            {
+              "role": "user",
+              "content": "Summarize the following action items: {{ $json.action-items }}"
+            }
+          ]
+        }
+      },
+      "name": "Summarize with LLM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [840, 300],
+      "credentials": {
+        "headerAuth": "OpenRouter API"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook - Document Ingested": {
+      "main": [
+        [
+          {
+            "node": "Extract Action Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Action Items": {
+      "main": [
+        [
+          {
+            "node": "Parties Detected?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parties Detected?": {
+      "main": [
+        [
+          {
+            "node": "Notify Reviewer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Summarize with LLM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1",
+  "triggerCount": 0,
+  "updatedAt": "2026-11-12T19:00:00Z",
+  "createdAt": "2026-11-12T19:00:00Z",
+  "versionId": "1"
+}

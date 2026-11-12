@@ -41,11 +41,9 @@ flowchart LR
 
 **Trust boundaries:** Manual intake first; no mailbox OAuth scopes. Raw text not persisted or printed in logs by default. No external actions without explicit user selection and confirmation. Unknown timezones require clarification — never guessed.
 
----
+## Demo Preview
 
-## Screenshots
-
-Placeholder screenshots will be added after the first deployment. The live dashboard at `https://bamaboy101.github.io/actionflow-ai/` shows:
+The live dashboard at **https://bamaboy101.github.io/actionflow-ai/** shows:
 
 - Sample notice selector and paste input
 - Consent checkbox
@@ -53,7 +51,7 @@ Placeholder screenshots will be added after the first deployment. The live dashb
 - Ambiguity warnings (missing timezone)
 - Approve button and .ics / checklist download
 
----
+> **Screenshot note:** Browser-based screenshot capture is unavailable in this environment. Visit the live demo above to interact with the dashboard directly.
 
 ## Features
 
