@@ -1,150 +1,95 @@
 # ActionFlow AI
 
-Everyday information into approved actions (MVP).
+Dates and obligations buried in emails and notices get missed. ActionFlow extracts them deterministically, flags ambiguity instead of guessing, and only exports what a human approved.
 
-## Live Demo
+**Live application: https://bamaboy101.github.io/actionflow-ai/** — open it in any browser. No login, no installation, no local server.
 
-🌐 **[Open the interactive demo →](https://bamaboy101.github.io/actionflow-ai/)**
-
-No setup, no credentials, no backend required. Runs entirely in your browser with labeled synthetic data.
-
----
-
-## What It Delivers
-
-Someone can paste an invitation or use a sample document, review proposed actions and export a calendar reminder without connecting a private mailbox.
-
-**Paste → Extract → Review → Approve → Export.**
-
-- Paste-text and synthetic sample notices — no mailbox access, no private data upload
-- Deterministic extraction of dates, times, tasks, parties, and requirements
-- Timezone and ambiguity flags — **no guessed timezones**
-- Review/edit/approve/reject each suggested action
-- Local ICS calendar export or task-checklist download
-- Idempotent export; no export of unreviewed actions
-- **No automatic sending, payments, or calendar creation without consent**
-
----
+| | |
+|---|---|
+| Frontend | https://bamaboy101.github.io/actionflow-ai/ |
+| Backend API | https://actionflow-api.marketmesh-api.workers.dev |
+| API health | https://actionflow-api.marketmesh-api.workers.dev/api/health |
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    A[Paste / Sample Notice] --> B[Processing Consent Gate]
-    B --> C[Deterministic Extraction]
-    C --> D[Timezone + Ambiguity Flags]
-    D --> E[Review / Edit / Approve]
-    E --> F[ICS Calendar + Checklist Export]
-    style B fill:#dcfce7,stroke:#16a34a
-    style F fill:#dbeafe,stroke:#2563eb
+  B[Browser] --> P["GitHub Pages<br/>apps/web/index.html"]
+  P -->|"HTTPS + x-demo-session"| W["Cloudflare Worker<br/>Hono API"]
+  W --> D[("Cloudflare D1")]
 ```
 
-**Trust boundaries:** Manual intake first; no mailbox OAuth scopes. Raw text not persisted or printed in logs by default. No external actions without explicit user selection and confirmation. Unknown timezones require clarification — never guessed.
+The frontend is a single self-contained `apps/web/index.html` (React and Tailwind from CDN). There is **no build step**, so the committed file is exactly what is served — this removes any drift between source and deployment.
 
-## Demo Preview
+Three independent GitHub Actions workflows:
 
-The live dashboard at **https://bamaboy101.github.io/actionflow-ai/** shows:
-
-- Sample notice selector and paste input
-- Consent checkbox
-- Extracted actions with source spans and timezone flags
-- Ambiguity warnings (missing timezone)
-- Approve button and .ics / checklist download
-
-## Demo Preview
-
-![Actionflow Dashboard Desktop](./screenshots/desktop.png)
-
-![Actionflow Dashboard Mobile](./screenshots/mobile.png)
-
-## Features
-
-| Feature | Status |
+| Workflow | Purpose |
 |---|---|
-| Paste-text intake + synthetic samples | ✅ Verified |
-| Deterministic extraction (dates/times/tasks/parties/requirements) | ✅ 5/5 tests pass |
-| Timezone + ambiguity flags | ✅ Verified |
-| Processing consent gate | ✅ Verified (400 without consent) |
-| Review/edit/approve/reject | ✅ Verified |
-| ICS calendar export | ✅ Verified |
-| Task-checklist export | ✅ Verified |
-| Idempotent export (approved actions only) | ✅ Verified |
-| No auto-send / no mailbox OAuth | ✅ By design |
+| `pages.yml` | Publishes `apps/web/index.html` to GitHub Pages and verifies the *published* HTML references the Worker |
+| `ci.yml` | API typecheck (`tsc --noEmit`) and unit tests (`vitest`) with committed lockfiles |
+| `e2e.yml` | Headless Chromium against the **live public URL**; uploads desktop + mobile screenshots, Playwright report, network/console diagnostics |
 
----
+Frontend deployment is deliberately decoupled from backend tests, so a failing test can never take the public site down.
 
-## Installation
+## Verified features
+
+- Sample notices plus free-text paste and real PDF upload
+- Text extraction from text-based PDFs performed in the Worker
+- Deterministic extraction of dates, times, parties and requirements
+- Timezone ambiguity is surfaced explicitly — never silently guessed
+- Explicit processing-consent gate before any extraction
+- Review → Approve workflow; only approved actions can be exported
+- Downloadable ICS calendar file and Markdown checklist
+
+## Technologies
+
+React (CDN) + Tailwind standalone frontend · Cloudflare Worker (Hono) · Cloudflare D1 · in-Worker PDF text extraction
+
+## Running locally
 
 ```bash
-# Clone
-git clone https://github.com/bamaboy101/actionflow-ai.git
-cd actionflow-ai
-
-# Backend
-cd apps/api
-npm install          # dev deps include vitest
-npm test             # 5 tests pass
-npm run dev          # API on :4002
-
-# Frontend (new terminal)
-cd ../web
-npm install
-npm run dev          # Dashboard on :5175
-
-# Docker (optional, once Docker daemon available)
-cd ../.. && docker compose up --build
+git clone https://github.com/Bamaboy101/actionflow-ai.git
+cd actionflow-ai/apps/api
+npm ci
+npm test            # unit tests
+npm run build       # typecheck
+npx wrangler dev    # API on http://localhost:8787
 ```
 
-Copy `.env.example` to `.env`. Demo uses labeled demonstration responses (no external AI call).
+Serve `apps/web/index.html` with any static server to run the frontend locally.
 
----
+### Browser acceptance tests
 
-## Configuration
+```bash
+cd e2e
+npm ci
+npx playwright install chromium
+APP_NAME=actionflow-ai WORKER_BASE=https://actionflow-api.marketmesh-api.workers.dev npx playwright test
+```
 
-| Variable | Purpose | Required |
-|---|---|---|
-| `PORT` | API port (default 4002) | No |
-| `AI_PROVIDER` | `demo` (default), `nvidia`, `openrouter` | No |
-| `NVIDIA_API_KEY` / `NVIDIA_MODEL` | Optional live AI provider | No |
-| `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` | Optional OpenRouter fallback | No |
+Tests run against the deployed public URL by default and write screenshots to `e2e/screenshots/`.
 
-No credentials are hardcoded, logged, or committed.
+## Security and data isolation
 
----
+- **Anonymous sessions.** The Worker issues an opaque UUID session id; the browser stores it in `localStorage` and sends it as `x-demo-session`. Every record is stamped with that id and every read is filtered by it, so two different browsers never see each other's records, while a reload keeps your own history. Verified with two independent browser contexts.
+- **Rate limiting.** 120 requests/minute per session; exceeding it returns `429` with `Retry-After`.
+- **Request size ceiling.** Bodies above 512 KiB are rejected with `413`.
+- **CORS allowlist.** Only the published GitHub Pages origin (and local dev origins) receive `Access-Control-Allow-Origin`; arbitrary origins receive none.
+- **Input validation.** All write endpoints validate required fields and return `400` with a JSON error.
+- **No secrets in the frontend.** The published HTML contains no API keys, tokens or credentials.
 
-## AI Provider
+## Limitations and honest scope
 
-Configurable adapter supports **NVIDIA** (preferred), **OpenRouter** (optional fallback), and **demo** (default). NVIDIA API is reachable and authenticated; no suitable model is available for this account, so the default is clearly labeled demonstration responses. OpenRouter is not required.
+- Scanned/image-only PDFs are **not** supported — no OCR is implemented or claimed.
+- Extraction is deterministic pattern matching, not an LLM; ambiguous input is flagged for human review.
+- Nothing is sent anywhere: no mailbox access, no calendar provider writes, no outbound messages.
+- Uploaded documents are processed in-memory for extraction; do not upload private or sensitive documents.
 
----
+## Test evidence
 
-## Limitations
-
-- Text-PDF upload / OCR not included (MVP)
-- Opt-in calendar provider connection not included
-- Email intake and multilingual parsing not included
-- No automatic sending, payments, or calendar creation
-
----
-
-## Security
-
-- **Manual intake first; no mailbox OAuth scopes.**
-- **Raw text not persisted or printed in logs by default.**
-- **No external actions without explicit user selection and confirmation.**
-- **Unknown timezones require clarification — never guessed.**
-- See `docs/privacy.md` for details.
-
----
-
-## Demo
-
-🌐 **[ActionFlow Live Demo](https://bamaboy101.github.io/actionflow-ai/)** — browser-based, no setup, labeled synthetic data.
-
-View source: `https://github.com/bamaboy101/actionflow-ai`
-
----
+CI, deployment and browser-acceptance runs — including screenshots and Playwright reports — are published as GitHub Actions artifacts on every run:
+**https://github.com/Bamaboy101/actionflow-ai/actions**
 
 ## License
 
-[MIT](LICENSE)
+MIT

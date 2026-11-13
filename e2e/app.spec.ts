@@ -49,7 +49,7 @@ test.describe('ActionFlow AI — live public acceptance', () => {
 
     await expect(page.getByRole('heading', { name: 'Review & Approve' })).toBeVisible({ timeout: 45_000 })
     await expect(page.getByText(/Identified \d+ action item/)).toBeVisible()
-    await expectWorkerCall(probe.workerCalls, '/api/extract')
+    await expectWorkerCall(probe.workerCalls, '/api/extract', 'POST')
     await shoot(page, '02-extracted', project)
 
     // Review then approve — approval must really change state.
