@@ -19,13 +19,51 @@
 
       const API_BASE = 'https://actionflow-api.marketmesh-api.workers.dev';
 
+      // ---- Anonymous session -------------------------------------------------
+      // The server issues an opaque session id; we persist it per browser profile
+      // so a reload keeps the same visitor identity, while a different browser
+      // (or private window) gets its own isolated records.
+      const SESSION_KEY = 'demo-session-id';
+      let SESSION_ID = null;
+      try { SESSION_ID = localStorage.getItem(SESSION_KEY); } catch (e) {}
+
+      function adoptSession(res) {
+        const issued = res.headers.get('x-demo-session');
+        if (issued && issued !== SESSION_ID) {
+          SESSION_ID = issued;
+          try { localStorage.setItem(SESSION_KEY, issued); } catch (e) {}
+        }
+      }
+
+      function sessionHeaders(extra) {
+        const h = Object.assign({}, extra || {});
+        if (SESSION_ID) h['x-demo-session'] = SESSION_ID;
+        return h;
+      }
+
       async function api(path, opts = {}) {
-        const res = await fetch(`${API_BASE}${path}`, {
-          ...opts,
-          headers: { 'Content-Type': 'application/json', ...opts.headers }
-        });
-        if (!res.ok) throw new Error(`API ${path}: ${res.status}`);
+        const headers = sessionHeaders(opts.headers);
+        // Let the browser set the multipart boundary for FormData bodies.
+        if (!(opts.body instanceof FormData)) headers['Content-Type'] = 'application/json';
+        const res = await fetch(`${API_BASE}${path}`, Object.assign({}, opts, { headers }));
+        adoptSession(res);
+        if (!res.ok) {
+          let detail = '';
+          try { const j = await res.json(); detail = j.error || j.message || ''; } catch (e) {}
+          throw new Error(`${res.status} ${detail || res.statusText} (${path})`);
+        }
         return res.json();
+      }
+
+      function ErrorBanner({ error, onDismiss }) {
+        if (!error) return null;
+        return React.createElement('div', {
+          role: 'alert', 'data-testid': 'error-banner',
+          className: 'mb-4 p-3 rounded-lg border border-red-300 bg-red-50 text-red-800 text-sm flex justify-between items-start gap-3'
+        },
+          React.createElement('span', null, 'Request failed: ' + error),
+          React.createElement('button', { onClick: onDismiss, className: 'underline shrink-0' }, 'Dismiss')
+        );
       }
 
       const SAMPLES = [
@@ -53,6 +91,8 @@
         const [actions, setActions] = useState([]);
         const [file, setFile] = useState(null);
         const [loading, setLoading] = useState(false);
+        const [error, setError] = useState(null);
+        const [consent, setConsent] = useState(false);
 
         useEffect(() => {
           api('/api/samples').then(setSamples);
@@ -75,7 +115,7 @@
             const formData = new FormData();
             if (sourceText) formData.append('source_text', sourceText);
             if (file) formData.append('file', file);
-            formData.append('processing_consent', 'true');
+            formData.append('processing_consent', String(consent));
             formData.append('source_type', file ? 'upload' : 'paste');
 
             const res = await fetch(`${API_BASE}/api/extract`, {
@@ -87,7 +127,7 @@
             setExtraction(result);
             setActions(result.actions);
             setStep('review');
-          } catch (e) { console.error(e); }
+          } catch (e) { setError(String(e.message || e)); }
           finally { setLoading(false); }
         };
 
@@ -99,25 +139,28 @@
               body: JSON.stringify({ request_id: extraction.request_id, action_id: actionId, edits: { [field]: value } })
             });
             setActions(prev => prev.map(a => a.id === actionId ? result.action : a));
-          } finally { setLoading(false); }
+          } catch (e) { setError(String(e.message || e)); }
+          finally { setLoading(false); }
         };
 
-        const onApprove = async () => {
-          setLoading(true);
+        const approveIds = async (ids) => {
+          if (!ids.length) { setError('Review an action before approving it.'); return; }
+          setLoading(true); setError(null);
           try {
             const result = await api('/api/approve', {
               method: 'POST',
-              body: JSON.stringify({
-                request_id: extraction.request_id,
-                action_ids: actions.filter(a => a.status === 'reviewed').map(a => a.id)
-              })
+              body: JSON.stringify({ request_id: extraction.request_id, action_ids: ids })
             });
             setActions(prev => prev.map(a => {
               const appr = result.approved.find(x => x.id === a.id);
-              return appr ? appr : a;
+              return appr ? Object.assign({}, a, appr, { approved: true, status: 'approved' }) : a;
             }));
-          } finally { setLoading(false); }
+          } catch (e) { setError(String(e.message || e)); }
+          finally { setLoading(false); }
         };
+
+        const onApproveOne = (id) => approveIds([id]);
+        const onApprove = () => approveIds(actions.filter(a => a.status === 'reviewed').map(a => a.id));
 
         const onExport = async (type) => {
           const approvedIds = actions.filter(a => a.approved).map(a => a.id);
@@ -146,6 +189,7 @@
               )
             ),
             React.createElement('div', { className: 'py-8 max-w-2xl mx-auto px-4' },
+              React.createElement(ErrorBanner, { error: error, onDismiss: () => setError(null) }),
               React.createElement('div', { className: 'bg-white rounded-lg shadow-sm border p-8 text-center' },
                 React.createElement('h1', { className: 'text-2xl font-bold mb-4' }, 'ActionFlow AI'),
                 React.createElement('p', { className: 'text-gray-600 mb-6' }, 'Choose a sample document or paste your own:'),
@@ -169,22 +213,23 @@
                   ),
                   React.createElement('button', {
                     onClick: onExtract,
-                    disabled: loading || (!sourceText && !file),
+                    disabled: loading || !consent || (!sourceText && !file),
                     className: 'flex-1 py-3 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50'
                   }, loading ? 'Extracting...' : 'Extract Actions'),
                   React.createElement('label', { className: 'flex items-center gap-2' },
-                    React.createElement('input', { type: 'checkbox', required: true }),
+                    React.createElement('input', { type: 'checkbox', 'data-testid': 'consent', checked: consent, onChange: (e) => setConsent(e.target.checked) }),
                     ' I consent to processing this text'
                   )
                 )
               )
             )
-          )
-        );
+          );
+        }
 
         if (step === 'review') {
           return React.createElement('div', { className: 'min-h-screen' },
             React.createElement('div', { className: 'max-w-4xl mx-auto px-4 py-6' },
+              React.createElement(ErrorBanner, { error: error, onDismiss: () => setError(null) }),
               React.createElement('div', { className: 'flex justify-between items-center mb-6' },
                 React.createElement('h1', { className: 'text-2xl font-bold' }, 'Review & Approve'),
                 React.createElement('button', {
@@ -248,7 +293,7 @@
                       className: 'flex-1 py-2 text-sm border rounded hover:bg-gray-50'
                     }, 'Revert'),
                     a.status === 'reviewed' && React.createElement('button', {
-                      onClick: () => onValidate(a.id, 'approved', true),
+                      onClick: () => onApproveOne(a.id),
                       className: 'flex-1 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700'
                     }, 'Approve')
                   ),
@@ -270,6 +315,7 @@
             )
           )
         );
+        }
       }
 
       const root = ReactDOM.createRoot(document.getElementById('root'));

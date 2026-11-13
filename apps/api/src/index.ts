@@ -1,16 +1,18 @@
-import { Hono } from 'hono'
-import { cors } from 'hono/cors'
+import { Hono, type Context } from 'hono'
+import { guard, sessionOf } from './guard'
 
-const app = new Hono<{ Bindings: { DB: D1Database } }>()
+type AppEnv = { Bindings: { DB?: D1Database }; Variables: { session: string } }
 
-app.use('*', cors())
+const app = new Hono<AppEnv>()
+
+app.use('*', guard({ tables: ['inputs', 'actions'] }))
 app.use('*', async (c, next) => {
   const start = Date.now()
   await next()
   console.log(`${c.req.method} ${c.req.path} ${c.res.status} ${Date.now() - start}ms`)
 })
 
-async function parseBody(c: any): Promise<any> {
+async function parseBody(c: Context): Promise<any> {
   try {
     const body = await c.req.raw.json()
     if (typeof body === 'object' && body !== null && !Array.isArray(body)) return body
@@ -150,7 +152,7 @@ app.post('/api/extract', async (c) => {
     // multipart/form-data for file upload
     const form = await c.req.parseBody()
     source_text = form.source_text as string | undefined
-    processing_consent = form.processing_consent === 'true' || form.processing_consent === true
+    processing_consent = form.processing_consent === 'true'
     source_type = (form.source_type as string) || 'paste'
     uploaded_file = form.file as any
   }
@@ -171,8 +173,8 @@ app.post('/api/extract', async (c) => {
     }
   }
 
-  if (!text_to_process || text_to_process.trim().length === 0) return c.status(400).json({ error: 'source_text or PDF file required' })
-  if (!processing_consent) return c.status(400).json({ error: 'processing_consent must be true' })
+  if (!text_to_process || text_to_process.trim().length === 0) return c.json({ error: 'source_text or PDF file required' }, 400)
+  if (!processing_consent) return c.json({ error: 'processing_consent must be true' }, 400)
 
   const id = `req:${crypto.randomUUID()}`
   const extraction = extractDeterministic(text_to_process)
@@ -181,12 +183,13 @@ app.post('/api/extract', async (c) => {
   try {
     if (c.env.DB) {
       await c.env.DB.prepare(
-        `INSERT INTO inputs (id, source_type, source_text, processing_consent, received_utc) VALUES (?,?,?,?,?)`
-      ).bind(id, source_type, text_to_process, processing_consent ? 1 : 0, new Date().toISOString())
+        `INSERT INTO inputs (id, source_type, source_text, processing_consent, received_utc, session_id) VALUES (?,?,?,?,?,?)`
+      ).bind(id, source_type, text_to_process, processing_consent ? 1 : 0, new Date().toISOString(), sessionOf(c)).run()
     }
   } catch (e) { console.error("D1 error:", e) }
 
-  const actItems = extraction.actions.map((_a: any) => {
+  const actItems: Action[] = []
+  for (const _a of extraction.actions) {
     const actionId = `act:${crypto.randomUUID()}`
     const action: Action = {
       id: actionId,
@@ -203,13 +206,13 @@ app.post('/api/extract', async (c) => {
     }
     try {
       if (c.env.DB) {
-        c.env.DB.prepare(
-          `INSERT INTO actions (id, input_id, title, due_utc, source_span, timezone, ambiguity, status, reviewed_at_utc, edit_fields, approved) VALUES (?,?,?,?,?,?,?,?,?,?,?)`
-        ).bind(actionId, id, action.title, action.due_utc, action.source_span, action.timezone, action.ambiguity, action.status, action.reviewed_at_utc, action.edit_fields, action.approved ? 1 : 0).run()
+        await c.env.DB.prepare(
+          `INSERT INTO actions (id, input_id, title, due_utc, source_span, timezone, ambiguity, status, reviewed_at_utc, edit_fields, approved, session_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+        ).bind(actionId, id, action.title, action.due_utc, action.source_span, action.timezone, action.ambiguity, action.status, action.reviewed_at_utc, action.edit_fields, action.approved ? 1 : 0, sessionOf(c)).run()
       }
     } catch (e) { console.error("D1 error:", e) }
-    return action
-  })
+    actItems.push(action)
+  }
 
   return c.json({ request_id: id, actions: actItems, parties: extraction.parties, requirements: extraction.requirements, summary: extraction.summary, ai_demo: true, file_name })
 })
@@ -221,10 +224,10 @@ app.post('/api/validate', async (c) => {
   let action: any = null
   try {
     if (c.env.DB) {
-      action = await c.env.DB.prepare(`SELECT * FROM actions WHERE id=?`).bind(action_id).first() as any
+      action = await c.env.DB.prepare(`SELECT * FROM actions WHERE id=? AND session_id=?`).bind(action_id, sessionOf(c)).first() as any
     }
   } catch (e) { console.error("D1 error:", e) }
-  if (!action || action.input_id !== request_id) return c.status(404).json({ error: 'action not found for request' })
+  if (!action || action.input_id !== request_id) return c.json({ error: 'action not found for request' }, 404)
 
   const now = new Date().toISOString()
   const updated: any = {
@@ -241,8 +244,8 @@ app.post('/api/validate', async (c) => {
   try {
     if (c.env.DB) {
       await c.env.DB.prepare(
-        `UPDATE actions SET title=?, due_utc=?, timezone=?, ambiguity=?, status='reviewed', reviewed_at_utc=?, edit_fields=? WHERE id=?`
-      ).bind(updated.title, updated.due_utc, updated.timezone, updated.ambiguity, updated.reviewed_at_utc, updated.edit_fields, action_id).run()
+        `UPDATE actions SET title=?, due_utc=?, timezone=?, ambiguity=?, status='reviewed', reviewed_at_utc=?, edit_fields=? WHERE id=? AND session_id=?`
+      ).bind(updated.title, updated.due_utc, updated.timezone, updated.ambiguity, updated.reviewed_at_utc, updated.edit_fields, action_id, sessionOf(c)).run()
     }
   } catch (e) { console.error("D1 error:", e) }
 
@@ -257,7 +260,7 @@ app.post('/api/validate', async (c) => {
 app.post('/api/approve', async (c) => {
   const body = await parseBody(c) as { request_id: string; action_ids: string[] }
   const { request_id, action_ids } = body
-  if (!Array.isArray(action_ids) || action_ids.length === 0) return c.status(400).json({ error: 'action_ids required' })
+  if (!Array.isArray(action_ids) || action_ids.length === 0) return c.json({ error: 'action_ids required' }, 400)
 
   const now = new Date().toISOString()
   const approved: any[] = []
@@ -265,7 +268,7 @@ app.post('/api/approve', async (c) => {
     let action: any = null
     try {
       if (c.env.DB) {
-        action = await c.env.DB.prepare(`SELECT * FROM actions WHERE id=?`).bind(aid).first() as any
+        action = await c.env.DB.prepare(`SELECT * FROM actions WHERE id=? AND session_id=?`).bind(aid, sessionOf(c)).first() as any
       }
     } catch (e) { console.error("D1 error:", e) }
     if (!action || action.input_id !== request_id) continue
@@ -273,13 +276,13 @@ app.post('/api/approve', async (c) => {
     const updated: any = { ...action, approved: true, status: 'approved' }
     try {
       if (c.env.DB) {
-        await c.env.DB.prepare(`UPDATE actions SET approved=1, status='approved' WHERE id=?`).bind(aid).run()
+        await c.env.DB.prepare(`UPDATE actions SET approved=1, status='approved' WHERE id=? AND session_id=?`).bind(aid, sessionOf(c)).run()
       }
     } catch (e) { console.error("D1 error:", e) }
     approved.push(updated)
   }
 
-  if (approved.length === 0) return c.status(400).json({ error: 'no reviewable actions to approve' })
+  if (approved.length === 0) return c.json({ error: 'no reviewable actions to approve' }, 400)
 
   return c.json({ request_id, approved, ai_demo: true })
 })
@@ -287,19 +290,19 @@ app.post('/api/approve', async (c) => {
 app.post('/api/export', async (c) => {
   const body = await parseBody(c) as { request_id: string; action_ids: string[]; output_type: 'ics' | 'checklist' }
   const { request_id, action_ids, output_type } = body
-  if (!Array.isArray(action_ids) || action_ids.length === 0) return c.status(400).json({ error: 'action_ids required' })
+  if (!Array.isArray(action_ids) || action_ids.length === 0) return c.json({ error: 'action_ids required' }, 400)
 
   const acts: any[] = []
   for (const aid of action_ids) {
     let action: any = null
     try {
       if (c.env.DB) {
-        action = await c.env.DB.prepare(`SELECT * FROM actions WHERE id=?`).bind(aid).first() as any
+        action = await c.env.DB.prepare(`SELECT * FROM actions WHERE id=? AND session_id=?`).bind(aid, sessionOf(c)).first() as any
       }
     } catch (e) { console.error("D1 error:", e) }
     if (action && action.approved && action.input_id === request_id) acts.push(action)
   }
-  if (acts.length === 0) return c.status(400).json({ error: 'no approved actions to export' })
+  if (acts.length === 0) return c.json({ error: 'no approved actions to export' }, 400)
 
   const id = `exp:${crypto.randomUUID()}`
   let content = ''
@@ -343,7 +346,7 @@ app.get('/api/actions/:request_id', async (c) => {
   const request_id = c.req.param('request_id')
   try {
     if (c.env.DB) {
-      const result = await c.env.DB.prepare(`SELECT * FROM actions WHERE input_id=?`).bind(request_id).all()
+      const result = await c.env.DB.prepare(`SELECT * FROM actions WHERE input_id=? AND session_id=?`).bind(request_id, sessionOf(c)).all()
       return c.json(result.results || [])
     }
   } catch (e) { console.error("D1 error:", e) }
@@ -352,11 +355,11 @@ app.get('/api/actions/:request_id', async (c) => {
 
 app.onError((err, c) => {
   console.error(err)
-  return c.status(500).json({ error: 'internal server error' })
+  return c.json({ error: 'internal server error' }, 500)
 })
 
 app.notFound((c) => {
-  return c.status(404).json({ error: 'not found' })
+  return c.json({ error: 'not found' }, 404)
 })
 
 export default app
