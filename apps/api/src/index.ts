@@ -334,12 +334,11 @@ app.post('/api/export', async (c) => {
     ].join('\n')
   }
 
-  return new Response(content, {
-    headers: {
-      'Content-Disposition': `attachment; filename="${filename}"`,
-      'Content-Type': output_type === 'ics' ? 'text/calendar' : 'text/markdown'
-    }
-  })
+  // Use Hono's response pipeline so the guard's CORS/session headers survive;
+  // a bare `new Response()` bypasses them and the browser blocks the download.
+  c.header('Content-Disposition', `attachment; filename="${filename}"`)
+  c.header('Content-Type', output_type === 'ics' ? 'text/calendar' : 'text/markdown')
+  return c.body(content)
 })
 
 app.get('/api/actions/:request_id', async (c) => {
