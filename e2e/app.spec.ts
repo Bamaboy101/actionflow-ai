@@ -43,7 +43,13 @@ test.describe('ActionFlow AI — live public acceptance', () => {
       'Please attend the review meeting on Friday, November 20 at 2:00pm EST. Bring a photo ID.'
     )
     await expect(extractBtn).toBeDisabled()
-    await page.getByTestId('consent').check()
+    const consentBox = page.getByTestId('consent')
+    if (!(await consentBox.count())) {
+      await shoot(page, '00-consent-missing', project)
+      const txt = await page.evaluate(() => document.body.innerText.slice(0, 1200))
+      throw new Error(`consent control missing. page text: ${txt}`)
+    }
+    await consentBox.check()
     await expect(extractBtn).toBeEnabled()
     await extractBtn.click()
 
