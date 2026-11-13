@@ -3,265 +3,277 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ActionFlow AI</title>
+    <title>ActionFlow AI — Document Processing & Task Automation</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-      body { font-family: 'Inter', sans-serif; }
+      body { font-family: 'Inter', sans-serif; margin: 0; background: #f9fafb; }
     </style>
   </head>
-  <body class="bg-gray-50 text-gray-900">
+  <body>
     <div id="root"></div>
-    <script type="module">
-      import React from 'https://esm.sh/react@18.2.0'
-      import ReactDOM from 'https://esm.sh/react-dom@18.2.0/client'
+    <script type="text/javascript">
+      const { useState, useEffect } = React;
 
-      const API_BASE = 'https://actionflow-api.marketmesh-api.workers.dev'
+      const API_BASE = 'https://actionflow-api.marketmesh-api.workers.dev';
 
-      async function fetchApi(path, opts = {}) {
-        const res = await fetch(`${API_BASE}${path}`, { ...opts, headers: { 'Content-Type': 'application/json', ...opts.headers } })
-        if (!res.ok) throw new Error(`API ${path}: ${res.status}`)
-        return res.json()
+      async function api(path, opts = {}) {
+        const res = await fetch(`${API_BASE}${path}`, {
+          ...opts,
+          headers: { 'Content-Type': 'application/json', ...opts.headers }
+        });
+        if (!res.ok) throw new Error(`API ${path}: ${res.status}`);
+        return res.json();
       }
 
+      const SAMPLES = [
+        { id: 'sample-1', title: 'Interview invitation', text: 'You are invited to interview for the Product Engineer role on Friday, November 20 at 2:00pm EST. Please bring a photo ID.' },
+        { id: 'sample-2', title: 'Library notice', text: 'Your book is due on 11/25/2026. Please return or renew it before the due date to avoid fines.' },
+        { id: 'sample-3', title: 'Dentist reminder', text: 'Dentist appointment with Dr. Lee on Tuesday, December 2 at 10:30am. Please arrive 15 minutes early.' },
+      ];
+
       function SampleCard({ sample, onSelect }) {
-        return (
-          <div className="p-4 border rounded-lg bg-white hover:shadow-md cursor-pointer transition" onClick={() => onSelect(sample)}>
-            <div className="font-medium">{sample.title}</div>
-            <div className="text-sm text-gray-500 mt-1 line-clamp-2">{sample.text}</div>
-          </div>
-        )
+        return React.createElement('div', {
+          className: 'p-4 border rounded-lg bg-white hover:shadow-md cursor-pointer transition',
+          onClick: () => onSelect(sample)
+        },
+          React.createElement('div', { className: 'font-medium' }, sample.title),
+          React.createElement('div', { className: 'text-sm text-gray-500 mt-1 line-clamp-2' }, sample.text)
+        );
       }
 
       function App() {
-        const [step, setStep] = React.useState('samples')
-        const [samples, setSamples] = React.useState([])
-        const [selectedSample, setSelectedSample] = React.useState(null)
-        const [sourceText, setSourceText] = React.useState('')
-        const [extraction, setExtraction] = React.useState(null)
-        const [actions, setActions] = React.useState([])
-        const [loading, setLoading] = React.useState(false)
+        const [step, setStep] = useState('samples');
+        const [samples, setSamples] = useState([]);
+        const [selectedSample, setSelectedSample] = useState(null);
+        const [sourceText, setSourceText] = useState('');
+        const [extraction, setExtraction] = useState(null);
+        const [actions, setActions] = useState([]);
+        const [file, setFile] = useState(null);
+        const [loading, setLoading] = useState(false);
 
-        React.useEffect(() => {
-          fetchApi('/api/samples').then(setSamples)
-        }, [])
+        useEffect(() => {
+          api('/api/samples').then(setSamples);
+        }, []);
 
         const onSelectSample = (s) => {
-          setSelectedSample(s)
-          setSourceText(s.text)
-          setStep('review')
-        }
+          setSelectedSample(s);
+          setSourceText(s.text);
+          setStep('review');
+        };
+
+        const onFileChange = (e) => {
+          setFile(e.target.files[0]);
+        };
 
         const onExtract = async () => {
-          if (!sourceText) return
-          setLoading(true)
+          if (!sourceText && !file) return;
+          setLoading(true);
           try {
-            const result = await fetchApi('/api/extract', {
+            const formData = new FormData();
+            if (sourceText) formData.append('source_text', sourceText);
+            if (file) formData.append('file', file);
+            formData.append('processing_consent', 'true');
+            formData.append('source_type', file ? 'upload' : 'paste');
+
+            const res = await fetch(`${API_BASE}/api/extract`, {
               method: 'POST',
-              body: JSON.stringify({ source_text: sourceText, processing_consent: true, source_type: 'paste' })
-            })
-            setExtraction(result)
-            setActions(result.actions)
-            setStep('review')
-          } finally { setLoading(false) }
-        }
+              body: formData
+            });
+            if (!res.ok) throw new Error(`API extract: ${res.status}`);
+            const result = await res.json();
+            setExtraction(result);
+            setActions(result.actions);
+            setStep('review');
+          } catch (e) { console.error(e); }
+          finally { setLoading(false); }
+        };
 
         const onValidate = async (actionId, field, value) => {
-          setLoading(true)
+          setLoading(true);
           try {
-            const result = await fetchApi('/api/validate', {
+            const result = await api('/api/validate', {
               method: 'POST',
               body: JSON.stringify({ request_id: extraction.request_id, action_id: actionId, edits: { [field]: value } })
-            })
-            setActions(prev => prev.map(a => a.id === actionId ? result.action : a))
-          } finally { setLoading(false) }
-        }
+            });
+            setActions(prev => prev.map(a => a.id === actionId ? result.action : a));
+          } finally { setLoading(false); }
+        };
 
         const onApprove = async () => {
-          setLoading(true)
+          setLoading(true);
           try {
-            const result = await fetchApi('/api/approve', {
+            const result = await api('/api/approve', {
               method: 'POST',
-              body: JSON.stringify({ request_id: extraction.request_id, action_ids: actions.filter(a => a.status === 'reviewed').map(a => a.id) })
-            })
+              body: JSON.stringify({
+                request_id: extraction.request_id,
+                action_ids: actions.filter(a => a.status === 'reviewed').map(a => a.id)
+              })
+            });
             setActions(prev => prev.map(a => {
-              const appr = result.approved.find(x => x.id === a.id)
-              return appr ? appr : a
-            }))
-          } finally { setLoading(false) }
-        }
+              const appr = result.approved.find(x => x.id === a.id);
+              return appr ? appr : a;
+            }));
+          } finally { setLoading(false); }
+        };
 
         const onExport = async (type) => {
-          const approvedIds = actions.filter(a => a.approved).map(a => a.id)
-          if (approvedIds.length === 0) return alert('No approved actions')
+          const approvedIds = actions.filter(a => a.approved).map(a => a.id);
+          if (approvedIds.length === 0) return alert('No approved actions');
           const res = await fetch(`${API_BASE}/api/export`, {
             method: 'POST',
             body: JSON.stringify({ request_id: extraction.request_id, action_ids: approvedIds, output_type: type })
-          })
-          const blob = await res.blob()
-          const url = URL.createObjectURL(blob)
-          const a = document.createElement('a')
-          a.href = url
-          a.download = type === 'ics' ? 'actionflow.ics' : 'actionflow.md'
-          a.click()
-        }
+          });
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = type === 'ics' ? 'actionflow.ics' : 'actionflow.md';
+          a.click();
+        };
 
-        const renderSteps = () => {
-          if (step === 'samples') {
-            return (
-              <div className="max-w-2xl mx-auto">
-                <div className="bg-white rounded-lg shadow-sm border p-8 text-center">
-                  <h1 className="text-2xl font-bold mb-4">ActionFlow AI</h1>
-                  <p className="text-gray-600 mb-6">Choose a sample document or paste your own:</p>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {samples.map(s => <SampleCard key={s.id} sample={s} onSelect={onSelectSample} />)}
-                  </div>
-                  <div className="mt-8 pt-6 border-t">
-                    <textarea
-                      className="w-full p-4 border rounded-lg font-mono text-sm"
-                      rows={8}
-                      placeholder="Paste email, notice, or document text here..."
-                      value={sourceText}
-                      onChange={(e) => setSourceText(e.target.value)}
-                    />
-                    <div className="mt-4 flex gap-2">
-                      <button onClick={onExtract} disabled={!sourceText || !loading} className="flex-1 py-3 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
-                        Extract Actions
-                      </button>
-                      <label className="flex-1">
-                        <input type="checkbox" className="mr-2" /> I consent to processing this text
-                      </label>
-                    </div>
-                  </div>
-                </div>
-              </div>
+        if (step === 'samples') {
+          return React.createElement('div', { className: 'min-h-screen' },
+            React.createElement('nav', { className: 'bg-white border-b shadow-sm' },
+              React.createElement('div', { className: 'max-w-4xl mx-auto px-4 py-3 flex justify-between items-center' },
+                React.createElement('div', { className: 'flex items-center gap-2' },
+                  React.createElement('div', { className: 'w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold' }, 'A'),
+                  React.createElement('span', { className: 'font-bold text-xl text-gray-800' }, 'ActionFlow AI')
+                ),
+                React.createElement('div', { className: 'text-sm text-gray-600' }, 'Demo mode • No private data')
+              )
+            ),
+            React.createElement('div', { className: 'py-8 max-w-2xl mx-auto px-4' },
+              React.createElement('div', { className: 'bg-white rounded-lg shadow-sm border p-8 text-center' },
+                React.createElement('h1', { className: 'text-2xl font-bold mb-4' }, 'ActionFlow AI'),
+                React.createElement('p', { className: 'text-gray-600 mb-6' }, 'Choose a sample document or paste your own:'),
+                React.createElement('div', { className: 'grid grid-cols-1 md:grid-cols-3 gap-4' },
+                  samples.map(s => React.createElement(SampleCard, { key: s.id, sample: s, onSelect: onSelectSample }))
+                ),
+                React.createElement('div', { className: 'mt-8 pt-6 border-t' }),
+                React.createElement('label', { className: 'block' },
+                  React.createElement('textarea', {
+                    className: 'w-full p-4 border rounded-lg font-mono text-sm',
+                    rows: 8,
+                    placeholder: 'Paste email, notice, or document text here...',
+                    value: sourceText,
+                    onChange: (e) => setSourceText(e.target.value)
+                  })
+                ),
+                React.createElement('div', { className: 'mt-4 flex gap-3' },
+                  React.createElement('label', { className: 'flex items-center gap-2' },
+                    React.createElement('input', { type: 'file', accept: '.pdf', onChange: onFileChange }),
+                    file && React.createElement('span', { className: 'text-sm text-gray-600' }, file.name)
+                  ),
+                  React.createElement('button', {
+                    onClick: onExtract,
+                    disabled: loading || (!sourceText && !file),
+                    className: 'flex-1 py-3 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50'
+                  }, loading ? 'Extracting...' : 'Extract Actions'),
+                  React.createElement('label', { className: 'flex items-center gap-2' },
+                    React.createElement('input', { type: 'checkbox', required: true }),
+                    ' I consent to processing this text'
+                  )
+                )
+              )
             )
-          }
+          )
+        );
 
-          if (step === 'review') {
-            return (
-              <div className="max-w-4xl mx-auto">
-                <div className="flex justify-between items-center mb-6">
-                  <h1 className="text-2xl font-bold">Review &amp; Approve</h1>
-                  <button onClick={() => setStep('samples')} className="text-sm text-gray-600 hover:underline">← Back</button>
-                </div>
-
-                <div className="bg-white rounded-lg shadow-sm border p-6 mb-6">
-                  <h2 className="font-bold mb-2">Source Text</h2>
-                  <div className="p-4 border rounded-lg bg-gray-50 font-mono text-sm whitespace-pre-wrap">{sourceText}</div>
-                  <div className="mt-4 text-sm text-gray-500">{extraction.summary}</div>
-                </div>
-
-                <div className="space-y-4">
-                  {actions.map((a, i) => (
-                    <div key={a.id} className="p-4 border rounded-lg bg-white">
-                      <div className="flex justify-between items-start mb-2">
-                        <div className="font-medium">{a.title}</div>
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${a.status === 'pending' ? 'bg-blue-100 text-blue-700' : a.status === 'reviewed' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700`} `}>
-                          {a.status}
-                        </span>
-                      </div>
-                      <div className="text-sm text-gray-600 mb-3">{a.source_span}</div>
-                      {a.ambiguity && <div className="mb-3 p-3 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800">{a.ambiguity}</div>}
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                        <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1">Title</label>
-                          <input
-                            className="w-full p-2 border rounded text-sm"
-                            value={a.title}
-                            onChange={(e) => onValidate(a.id, 'title', e.target.value)}
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1">Timezone</label>
-                          <input
-                            className="w-full p-2 border rounded text-sm"
-                            value={a.timezone || ''}
-                            placeholder="e.g. EST"
-                            onChange={(e) => onValidate(a.id, 'timezone', e.target.value)}
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1">Due UTC</label>
-                          <input
-                            className="w-full p-2 border rounded text-sm"
-                            type="datetime-local"
-                            value={a.due_utc || ''}
-                            onChange={(e) => onValidate(a.id, 'due_utc', e.target.value)}
-                          />
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        {a.status === 'pending' && (
-                          <button
-                            onClick={() => onValidate(a.id, 'status', 'reviewed')}
-                            className="flex-1 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-                          >
-                            Review
-                          </button>
-                        )}
-                        {a.status === 'reviewed' && (
-                          <>
-                            <button
-                              onClick={() => onValidate(a.id, 'status', 'pending')}
-                              className="flex-1 py-2 text-sm border rounded hover:bg-gray-50"
-                            >
-                              Revert
-                            </button>
-                            <button
-                              onClick={() => onValidate(a.id, 'approved', true)}
-                              className="flex-1 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700"
-                            >
-                              Approve
-                            </button>
-                          </>
-                        )}
-                        {a.approved && (
-                          <span className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded">Approved</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-
-                  <div className="mt-6 flex gap-2 justify-end">
-                    <button
-                      onClick={() => onExport('ics')}
-                      disabled={actions.filter(a => a.approved).length === 0 || loading}
-                      className="px-4 py-2 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50"
-                    >
-                      Export ICS Calendar
-                    </button>
-                    <button
-                      onClick={() => onExport('checklist')}
-                      disabled={actions.filter(a => a.approved).length === 0 || loading}
-                      className="px-4 py-2 text-sm border rounded hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      Export Checklist
-                    </button>
-                  </div>
-                </div>
-              </div>
+        if (step === 'review') {
+          return React.createElement('div', { className: 'min-h-screen' },
+            React.createElement('div', { className: 'max-w-4xl mx-auto px-4 py-6' },
+              React.createElement('div', { className: 'flex justify-between items-center mb-6' },
+                React.createElement('h1', { className: 'text-2xl font-bold' }, 'Review & Approve'),
+                React.createElement('button', {
+                  onClick: () => setStep('samples'),
+                  className: 'text-sm text-gray-600 hover:underline'
+                }, '← Back')
+              ),
+              React.createElement('div', { className: 'bg-white rounded-lg shadow-sm border p-6 mb-6' },
+                React.createElement('h2', { className: 'font-bold mb-2' }, 'Source Text'),
+                React.createElement('div', { className: 'p-4 border rounded-lg bg-gray-50 font-mono text-sm whitespace-pre-wrap' }, sourceText),
+                React.createElement('div', { className: 'mt-4 text-sm text-gray-500' }, extraction.summary)
+              ),
+              React.createElement('div', { className: 'space-y-4' },
+                actions.map((a, i) => React.createElement('div', {
+                  key: a.id,
+                  className: 'p-4 border rounded-lg bg-white'
+                },
+                  React.createElement('div', { className: 'flex justify-between items-start mb-2' },
+                    React.createElement('div', { className: 'font-medium' }, a.title),
+                    React.createElement('span', {
+                      className: `px-2 py-0.5 rounded-full text-xs font-medium ${a.status === 'pending' ? 'bg-blue-100 text-blue-700' : a.status === 'reviewed' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`
+                    }, a.status)
+                  ),
+                  React.createElement('div', { className: 'text-sm text-gray-600 mb-3' }, a.source_span),
+                  a.ambiguity && React.createElement('div', { className: 'mb-3 p-3 bg-amber-50 border border-amber-200 rounded text-sm text-amber-800' }, a.ambiguity),
+                  React.createElement('div', { className: 'grid grid-cols-1 md:grid-cols-3 gap-4 mb-4' },
+                    React.createElement('div', null,
+                      React.createElement('label', { className: 'block text-xs font-medium text-gray-600 mb-1' }, 'Title'),
+                      React.createElement('input', {
+                        className: 'w-full p-2 border rounded text-sm',
+                        value: a.title,
+                        onChange: (e) => onValidate(a.id, 'title', e.target.value)
+                      })
+                    ),
+                    React.createElement('div', null,
+                      React.createElement('label', { className: 'block text-xs font-medium text-gray-600 mb-1' }, 'Timezone'),
+                      React.createElement('input', {
+                        className: 'w-full p-2 border rounded text-sm',
+                        value: a.timezone || '',
+                        placeholder: 'e.g. EST',
+                        onChange: (e) => onValidate(a.id, 'timezone', e.target.value)
+                      })
+                    ),
+                    React.createElement('div', null,
+                      React.createElement('label', { className: 'block text-xs font-medium text-gray-600 mb-1' }, 'Due UTC'),
+                      React.createElement('input', {
+                        className: 'w-full p-2 border rounded text-sm',
+                        type: 'datetime-local',
+                        value: a.due_utc || '',
+                        onChange: (e) => onValidate(a.id, 'due_utc', e.target.value)
+                      })
+                    )
+                  ),
+                  React.createElement('div', { className: 'flex gap-2' },
+                    a.status === 'pending' && React.createElement('button', {
+                      onClick: () => onValidate(a.id, 'status', 'reviewed'),
+                      className: 'flex-1 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700'
+                    }, 'Review'),
+                    a.status === 'reviewed' && React.createElement('button', {
+                      onClick: () => onValidate(a.id, 'status', 'pending'),
+                      className: 'flex-1 py-2 text-sm border rounded hover:bg-gray-50'
+                    }, 'Revert'),
+                    a.status === 'reviewed' && React.createElement('button', {
+                      onClick: () => onValidate(a.id, 'approved', true),
+                      className: 'flex-1 py-2 text-sm bg-green-600 text-white rounded hover:bg-green-700'
+                    }, 'Approve')
+                  ),
+                  a.approved && React.createElement('span', { className: 'px-2 py-1 text-xs bg-green-100 text-green-700 rounded' }, 'Approved')
+                )
+              ),
+              React.createElement('div', { className: 'mt-6 flex gap-2 justify-end' },
+                React.createElement('button', {
+                  onClick: () => onExport('ics'),
+                  disabled: actions.filter(a => a.approved).length === 0 || loading,
+                  className: 'px-4 py-2 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50'
+                }, 'Export ICS Calendar'),
+                React.createElement('button', {
+                  onClick: () => onExport('checklist'),
+                  disabled: actions.filter(a => a.approved).length === 0 || loading,
+                  className: 'px-4 py-2 text-sm border rounded hover:bg-gray-50 disabled:opacity-50'
+                }, 'Export Checklist')
+              )
             )
-          }
-        }
-
-        return (
-          <div className="min-h-screen">
-            <nav className="bg-white border-b shadow-sm">
-              <div className="max-w-4xl mx-auto px-4 py-3 flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold">A</div>
-                  <span className="font-bold text-xl text-gray-800">ActionFlow AI</span>
-                </div>
-                <div className="text-sm text-gray-600">Demo mode • No private data</div>
-              </div>
-            </nav>
-            <div className="py-8">{renderSteps()}</div>
-          </div>
-        )
+          )
+        );
       }
 
-      ReactDOM.createRoot(document.getElementById('root')).render(<App />)
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(React.createElement(App));
     </script>
   </body>
 </html>
