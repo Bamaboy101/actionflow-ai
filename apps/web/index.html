@@ -78,7 +78,7 @@
           onClick: () => onSelect(sample)
         },
           React.createElement('div', { className: 'font-medium' }, sample.title),
-          React.createElement('div', { className: 'text-sm text-gray-500 mt-1 line-clamp-2' }, sample.text)
+          React.createElement('div', { className: 'text-sm text-gray-500 mt-1 overflow-hidden break-words', style: { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' } }, sample.text)
         );
       }
 
@@ -205,7 +205,7 @@
               React.createElement('div', { className: 'bg-white rounded-lg shadow-sm border p-8 text-center' },
                 React.createElement('h1', { className: 'text-2xl font-bold mb-4' }, 'ActionFlow AI'),
                 React.createElement('p', { className: 'text-gray-600 mb-6' }, 'Choose a sample document or paste your own:'),
-                React.createElement('div', { className: 'grid grid-cols-1 md:grid-cols-3 gap-4' },
+                React.createElement('div', { className: 'grid grid-cols-1 md:grid-cols-3 gap-4 relative z-0' },
                   samples.map(s => React.createElement(SampleCard, { key: s.id, sample: s, onSelect: onSelectSample }))
                 ),
                 React.createElement('div', { className: 'mt-8 pt-6 border-t' }),
@@ -218,7 +218,7 @@
                     onChange: (e) => setSourceText(e.target.value)
                   })
                 ),
-                React.createElement('div', { className: 'mt-4 flex gap-3' },
+                React.createElement('div', { className: 'mt-4 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center relative z-10' },
                   React.createElement('label', { className: 'flex items-center gap-2' },
                     React.createElement('input', { type: 'file', accept: '.pdf', onChange: onFileChange }),
                     file && React.createElement('span', { className: 'text-sm text-gray-600' }, file.name)
@@ -228,8 +228,8 @@
                     disabled: loading || !consent || (!sourceText && !file),
                     className: 'flex-1 py-3 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50'
                   }, loading ? 'Extracting...' : 'Extract Actions'),
-                  React.createElement('label', { className: 'flex items-center gap-2' },
-                    React.createElement('input', { type: 'checkbox', 'data-testid': 'consent', checked: consent, onChange: (e) => setConsent(e.target.checked) }),
+                  React.createElement('label', { className: 'flex items-center gap-2 text-sm cursor-pointer select-none py-2' },
+                    React.createElement('input', { type: 'checkbox', 'data-testid': 'consent', className: 'w-5 h-5 shrink-0', checked: consent, onChange: (e) => setConsent(e.target.checked) }),
                     ' I consent to processing this text'
                   )
                 )
