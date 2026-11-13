@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { instrument, openApp, shoot, dumpDiagnostics, WORKER } from './helpers'
+import { instrument, openApp, shoot, dumpDiagnostics, expectWorkerCall, WORKER } from './helpers'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -34,7 +34,7 @@ test.describe('ActionFlow AI — live public acceptance', () => {
     await openApp(page)
     await expect(page).toHaveTitle(/ActionFlow/i)
     await expect(page.getByText('Interview invitation').first()).toBeVisible({ timeout: 45_000 })
-    expect(probe.workerCalls.some((c) => c.url.endsWith('/api/samples') && c.status === 200)).toBeTruthy()
+    await expectWorkerCall(probe.workerCalls, '/api/samples')
     await shoot(page, '01-samples', project)
 
     // Consent genuinely gates extraction.
@@ -49,7 +49,7 @@ test.describe('ActionFlow AI — live public acceptance', () => {
 
     await expect(page.getByRole('heading', { name: 'Review & Approve' })).toBeVisible({ timeout: 45_000 })
     await expect(page.getByText(/Identified \d+ action item/)).toBeVisible()
-    expect(probe.workerCalls.some((c) => c.url.includes('/api/extract') && c.status === 200)).toBeTruthy()
+    await expectWorkerCall(probe.workerCalls, '/api/extract')
     await shoot(page, '02-extracted', project)
 
     // Review then approve — approval must really change state.
@@ -57,9 +57,7 @@ test.describe('ActionFlow AI — live public acceptance', () => {
     await expect(page.getByText('reviewed').first()).toBeVisible({ timeout: 45_000 })
     await page.getByRole('button', { name: 'Approve', exact: true }).first().click()
     await expect(page.getByText('approved').first()).toBeVisible({ timeout: 45_000 })
-    const approveCall = probe.workerCalls.find((c) => c.url.includes('/api/approve'))
-    expect(approveCall, 'approval must hit the Worker').toBeTruthy()
-    expect(approveCall!.status).toBe(200)
+    await expectWorkerCall(probe.workerCalls, '/api/approve', 'POST')
     await shoot(page, '03-approved', project)
 
     // ICS export must download a valid calendar file.
