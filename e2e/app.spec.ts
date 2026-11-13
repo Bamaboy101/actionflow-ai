@@ -60,11 +60,23 @@ test.describe('ActionFlow AI — live public acceptance', () => {
     await expectWorkerCall(probe.workerCalls, '/api/approve', 'POST')
     await shoot(page, '03-approved', project)
 
+    // Export must be enabled, i.e. an action is genuinely approved.
+    const exportBtn = page.getByRole('button', { name: 'Export ICS Calendar' })
+    await expect(exportBtn).toBeEnabled({ timeout: 30_000 })
+    const banner = page.getByTestId('error-banner')
+    expect(await banner.count(), 'no error banner before export').toBe(0)
+
     // ICS export must download a valid calendar file.
-    const [download] = await Promise.all([
-      page.waitForEvent('download'),
-      page.getByRole('button', { name: 'Export ICS Calendar' }).click(),
-    ])
+    const downloadPromise = page.waitForEvent('download', { timeout: 30_000 })
+    await exportBtn.click()
+    let download
+    try {
+      download = await downloadPromise
+    } catch (e) {
+      const bannerText = (await banner.count()) ? await banner.innerText() : '(no error banner)'
+      const state = await page.evaluate(() => document.body.innerText.slice(0, 1500))
+      throw new Error(`download did not start. banner=${bannerText}\npage=${state}`)
+    }
     const icsPath = path.join(testInfo.outputDir, 'export.ics')
     await download.saveAs(icsPath)
     const ics = fs.readFileSync(icsPath, 'utf8')
