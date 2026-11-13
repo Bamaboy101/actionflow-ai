@@ -1,5 +1,5 @@
 {
-  "name": "ActionFlow AI - Document Processing Workflow",
+  "name": "ActionFlow AI - Document Processing",
   "nodes": [
     {
       "parameters": {
@@ -18,13 +18,9 @@
         "httpMethod": "POST",
         "url": "http://localhost:4002/api/extract",
         "jsonParameters": true,
-        "bodyParametersJson": "{
-          \"source_text\": \"={{ $json.text }}\",
-          \"processing_consent\": true,
-          \"source_type\": \"upload\"
-        }"
+        "bodyParametersJson": "{ \"source_text\": \"{{ $json.source_text }}\", \"processing_consent\": true, \"source_type\": \"{{ $json.source_type }}\" }"
       },
-      "name": "Send to ActionFlow API",
+      "name": "Send to ActionFlow",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 1,
       "position": [460, 100]
@@ -34,9 +30,9 @@
         "conditions": {
           "boolean": [
             {
-              "value1": \"={{ $json.actions.length > 0 }}\",
-              "operation": \"equals\",
-              \"value2\": \"true\"
+              "value1": "{{ $json.actions.length > 0 }}",
+              "operation": "equals",
+              "value2": true
             }
           ]
         },
@@ -52,8 +48,8 @@
     {
       "parameters": {
         "to": "reviewer@example.com",
-        "subject": "ActionFlow AI: New Actions Require Review",
-        "text": "New document processed:\\n\\nSummary: {{ $json.summary }}\\nActions: {{ $json.actions.length }}\\nParties: {{ $json.parties.join(', ') }}\\n\\nPlease review in ActionFlow dashboard."
+        "subject": "ActionFlow AI - Actions to Review",
+        "text": "New document processed:\\n\\nSummary: {{ $json.summary }}\\nActions: {{ $json.actions.length }}\\nParties: {{ $json.parties.join(', ') }}\\n\\nReview in ActionFlow dashboard."
       },
       "name": "Notify Reviewer",
       "type": "n8n-nodes-base.sendEmail",
@@ -62,29 +58,6 @@
       "credentials": {
         "smtp": "smtp-credentials"
       }
-    },
-    {
-      "parameters": {
-        "httpMethod": "POST",
-        "url": "https://api.openrouter.ai/v1/chat/completions",
-        "jsonParameters": true,
-        "bodyParametersJson": "{
-          \"model\": \"openrouter/auto\",
-          \"messages\": [
-            {
-              \"role\": \"user\",
-              \"content\": \"Summarize and extract key dates from: {{ $json.actions }}\"
-            }
-          ]
-        }"
-      },
-      "name": "AI Summarization",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 1,
-      "position": [840, -100],
-      "credentials": {
-        "headerAuth": "openrouter-api-key"
-      }
     }
   ],
   "connections": {
@@ -92,14 +65,14 @@
       "main": [
         [
           {
-            "node": "Send to ActionFlow API",
+            "node": "Send to ActionFlow",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Send to ActionFlow API": {
+    "Send to ActionFlow": {
       "main": [
         [
           {
@@ -115,13 +88,6 @@
         [
           {
             "node": "Notify Reviewer",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "AI Summarization",
             "type": "main",
             "index": 0
           }
