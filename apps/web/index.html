@@ -209,7 +209,7 @@
                   samples.map(s => React.createElement(SampleCard, { key: s.id, sample: s, onSelect: onSelectSample }))
                 ),
                 React.createElement('div', { className: 'mt-8 pt-6 border-t' }),
-                React.createElement('label', { className: 'block' },
+                React.createElement('div', { className: 'block text-left' },
                   React.createElement('textarea', {
                     className: 'w-full p-4 border rounded-lg font-mono text-sm',
                     rows: 8,
@@ -218,7 +218,7 @@
                     onChange: (e) => setSourceText(e.target.value)
                   })
                 ),
-                React.createElement('div', { className: 'mt-4 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center relative z-10' },
+                React.createElement('div', { className: 'mt-6 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center relative z-10 text-left' },
                   React.createElement('label', { className: 'flex items-center gap-2' },
                     React.createElement('input', { type: 'file', accept: '.pdf', onChange: onFileChange }),
                     file && React.createElement('span', { className: 'text-sm text-gray-600' }, file.name)
