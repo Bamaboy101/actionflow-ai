@@ -1,58 +1,102 @@
-import express, { type Request, type Response, type NextFunction } from 'express'
+import express from 'express'
 import cors from 'cors'
-import { z } from 'zod'
-import { randomUUID } from 'crypto'
-import { initDb, db, createInput, listActionsByInput, upsertAction, getAction, listExports, insertExport, type Action } from './store'
-import { parseInput, type ExtractionResult } from './extract'
-import { createAIProvider } from './ai/provider'
 
 const app = express()
-const PORT = Number(process.env.PORT) || 4002
-const ai = createAIProvider()
-
 app.use(cors())
 app.use(express.json())
 
-app.use((_req: Request, _res: Response, next: NextFunction) => {
+app.use((req, res, next) => {
   const start = Date.now()
-  _res.on('finish', () => {
-    console.log(`${_req.method} ${_req.originalUrl} ${_res.statusCode} ${Date.now() - start}ms`)
+  res.on('finish', () => {
+    console.log(`${req.method} ${req.path} ${res.statusCode} ${Date.now() - start}ms`)
   })
   next()
 })
 
-app.get('/api/health', (_req: Request, res: Response) => {
-  res.json({ status: 'ok', ai_provider: ai.provider, ai_demo: ai.isDemo, utc: new Date().toISOString() })
-})
+type Sample = { id: string; title: string; text: string }
+type Action = { id: string; input_id: string; title: string; due_utc: string | null; source_span: string | null; timezone: string | null; ambiguity: string | null; status: string; reviewed_at_utc: string | null; edit_fields: string | null; approved: boolean }
 
-const extractBody = z.object({
-  source_text: z.string().min(1).max(10000),
-  processing_consent: z.boolean().default(false),
-  source_type: z.enum(['paste', 'upload']).default('paste')
-})
+const samples: Sample[] = [
+  { id: 'sample-1', title: 'Interview invitation', text: 'You are invited to interview for the Product Engineer role on Friday, November 20 at 2:00pm EST. Please bring a photo ID.' },
+  { id: 'sample-2', title: 'Library notice', text: 'Your book is due on 11/25/2026. Please return or renew it before the due date to avoid fines.' },
+  { id: 'sample-3', title: 'Dentist reminder', text: 'Dentist appointment with Dr. Lee on Tuesday, December 2 at 10:30am. Please arrive 15 minutes early.' },
+]
 
-app.post('/api/extract', (req: Request, res: Response) => {
-  const parsed = extractBody.safeParse(req.body)
-  if (!parsed.success) return res.status(400).json({ error: 'invalid body', issues: parsed.error.flatten() })
-  const { source_text, processing_consent, source_type } = parsed.data
+const actions: Action[] = []
 
-  if (!processing_consent) {
-    return res.status(400).json({ error: 'processing_consent must be true' })
+function extractDeterministic(text: string): { actions: any[]; parties: string[]; requirements: string[]; summary: string } {
+  const actItems: any[] = []
+  const parties: string[] = []
+  const requirements: string[] = []
+
+  const withMatches = text.match(/with\s+([A-Z][a-zA-Z. ]+?)(?:\s+(?:on|at|in|for|to|and|the|a|an)|$)/gi)
+  if (withMatches) {
+    for (const m of withMatches) {
+      const name = m.replace(/with\s+/i, '').replace(/\s+(on|at|in|for|to|and|the|a|an)$/i, '').trim()
+      if (name && !parties.includes(name)) parties.push(name)
+    }
   }
 
-  const id = `req:${randomUUID()}`
-  const input = { id, source_type, source_text, processing_consent: true, received_utc: new Date().toISOString() }
-  createInput(db, input)
+  let foundSpan = ''
+  for (const rx of [/(?:on|at|in)\s+([A-Z][a-z]+day),\s*([A-Z][a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?/i, /([A-Z][a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?/i, /(\d{1,2})\/(\d{1,2})\/(\d{2,4})/i]) {
+    const m = text.match(rx)
+    if (m) { foundSpan = m[0]; break }
+  }
 
-  const extraction: ExtractionResult = parseInput(source_text)
+  const timeM = text.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i)
+  if (timeM) foundSpan = foundSpan ? foundSpan + ' ' + timeM[0] : timeM[0]
 
-  const actions = extraction.actions.map((_a, i) => {
-    const actionId = `act:${randomUUID()}`
+  const tzM = text.match(/\b(UTC|EST|EDT|PST|PDT|GMT|BST|IST|CET|CEST)\b/)
+  const timezone = tzM ? tzM[0] : null
+  const hasDateTime = !!foundSpan
+
+  if (foundSpan) {
+    const title = `Follow up on: ${foundSpan.slice(0, 60)}${foundSpan.length > 60 ? '…' : ''}`
+    actItems.push({
+      title,
+      due_utc: null,
+      source_span: foundSpan,
+      timezone,
+      ambiguity: !timezone && hasDateTime ? 'No timezone specified; please confirm before exporting a calendar entry.' : null
+    })
+  }
+
+  const reqMatches = text.match(/[^.!?]*(?:please|need|must|bring|attach|provide)[^.!?]*[.!?]?/gi)
+  if (reqMatches) {
+    for (const r of reqMatches) {
+      const t = r.trim()
+      if (t.length > 0 && !requirements.includes(t)) requirements.push(t)
+    }
+  }
+
+  const summary = actItems.length ? `Identified ${actItems.length} action item(s)${parties.length ? ` involving ${parties.join(', ')}` : ''}.` : 'No clear action items detected.'
+
+  return { actions: actItems, parties, requirements, summary }
+}
+
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', mode: 'demo', utc: new Date().toISOString() })
+})
+
+app.get('/api/samples', (_req, res) => {
+  res.json(samples)
+})
+
+app.post('/api/extract', (req, res) => {
+  const { source_text, processing_consent, source_type } = req.body
+  if (!source_text) return res.status(400).json({ error: 'source_text required' })
+  if (processing_consent !== true) return res.status(400).json({ error: 'processing_consent must be true' })
+
+  const id = `req:${crypto.randomUUID()}`
+  const extraction = extractDeterministic(source_text)
+
+  const actItems = extraction.actions.map((_a: any) => {
+    const actionId = `act:${crypto.randomUUID()}`
     const action: Action = {
       id: actionId,
       input_id: id,
       title: _a.title,
-      due_utc: _a.due_utc,
+      due_utc: null,
       source_span: _a.source_span,
       timezone: _a.timezone,
       ambiguity: _a.ambiguity,
@@ -61,29 +105,20 @@ app.post('/api/extract', (req: Request, res: Response) => {
       edit_fields: null,
       approved: false
     }
-    upsertAction(db, action)
+    actions.push(action)
     return action
   })
 
-  res.json({ request_id: id, actions, parties: extraction.parties, requirements: extraction.requirements, summary: extraction.summary, ai_demo: true })
+  res.json({ request_id: id, actions: actItems, parties: extraction.parties, requirements: extraction.requirements, summary: extraction.summary, ai_demo: true })
 })
 
-const validateBody = z.object({
-  request_id: z.string().min(1),
-  action_id: z.string().min(1),
-  edits: z.object({ title: z.string().optional(), due_utc: z.string().optional().nullable(), timezone: z.string().optional().nullable(), ambiguity: z.string().optional().nullable() }).optional()
-})
-
-app.post('/api/validate', (req: Request, res: Response) => {
-  const parsed = validateBody.safeParse(req.body)
-  if (!parsed.success) return res.status(400).json({ error: 'invalid body', issues: parsed.error.flatten() })
-  const { request_id, action_id, edits } = parsed.data
-
-  const action = getAction(db, action_id)
+app.post('/api/validate', (req, res) => {
+  const { request_id, action_id, edits } = req.body
+  const action = actions.find(a => a.id === action_id)
   if (!action || action.input_id !== request_id) return res.status(404).json({ error: 'action not found for request' })
 
   const now = new Date().toISOString()
-  const updated: Action = {
+  const updated: any = {
     ...action,
     title: edits?.title ?? action.title,
     due_utc: edits?.due_utc !== undefined ? edits.due_utc : action.due_utc,
@@ -93,7 +128,9 @@ app.post('/api/validate', (req: Request, res: Response) => {
     reviewed_at_utc: now,
     edit_fields: edits ? JSON.stringify(Object.keys(edits)) : action.edit_fields
   }
-  upsertAction(db, updated)
+
+  const idx = actions.findIndex(a => a.id === action_id)
+  actions[idx] = updated
 
   let clarification: string | null = null
   if (!updated.timezone && updated.due_utc) {
@@ -103,24 +140,19 @@ app.post('/api/validate', (req: Request, res: Response) => {
   res.json({ action: updated, clarification, ai_demo: true })
 })
 
-const approveBody = z.object({
-  request_id: z.string().min(1),
-  action_ids: z.array(z.string().min(1)).min(1)
-})
-
-app.post('/api/approve', (req: Request, res: Response) => {
-  const parsed = approveBody.safeParse(req.body)
-  if (!parsed.success) return res.status(400).json({ error: 'invalid body', issues: parsed.error.flatten() })
-  const { request_id, action_ids } = parsed.data
+app.post('/api/approve', (req, res) => {
+  const { request_id, action_ids } = req.body
+  if (!Array.isArray(action_ids) || action_ids.length === 0) return res.status(400).json({ error: 'action_ids required' })
 
   const now = new Date().toISOString()
-  const approved: Action[] = []
+  const approved: any[] = []
   for (const aid of action_ids) {
-    const action = getAction(db, aid)
+    const action = actions.find(a => a.id === aid)
     if (!action || action.input_id !== request_id) continue
     if (action.status !== 'reviewed') continue
-    const updated: Action = { ...action, approved: true, status: 'approved' }
-    upsertAction(db, updated)
+    const updated: any = { ...action, approved: true, status: 'approved' }
+    const idx = actions.findIndex(a => a.id === aid)
+    actions[idx] = updated
     approved.push(updated)
   }
 
@@ -129,36 +161,27 @@ app.post('/api/approve', (req: Request, res: Response) => {
   res.json({ request_id, approved, ai_demo: true })
 })
 
-const exportBody = z.object({
-  request_id: z.string().min(1),
-  action_ids: z.array(z.string().min(1)).min(1),
-  output_type: z.enum(['ics', 'checklist'])
-})
+app.post('/api/export', (req, res) => {
+  const { request_id, action_ids, output_type } = req.body
+  if (!Array.isArray(action_ids) || action_ids.length === 0) return res.status(400).json({ error: 'action_ids required' })
 
-app.post('/api/export', (req: Request, res: Response) => {
-  const parsed = exportBody.safeParse(req.body)
-  if (!parsed.success) return res.status(400).json({ error: 'invalid body', issues: parsed.error.flatten() })
-  const { request_id, action_ids, output_type } = parsed.data
+  const acts = action_ids.map(aid => actions.find(a => a.id === aid)).filter((a: any) => !!a && a.approved && a.input_id === request_id)
+  if (acts.length === 0) return res.status(400).json({ error: 'no approved actions to export' })
 
-  const actions = action_ids.map(aid => getAction(db, aid)).filter((a): a is Action => !!a && a.approved && a.input_id === request_id)
-  if (actions.length === 0) return res.status(400).json({ error: 'no approved actions to export' })
-
-  const id = `exp:${randomUUID()}`
-  const exportRow = { id, action_ids: JSON.stringify(action_ids), output_type, generated_at_utc: new Date().toISOString() }
-  insertExport(db, exportRow)
-
+  const id = `exp:${crypto.randomUUID()}`
   let content = ''
   let filename = ''
+
   if (output_type === 'ics') {
     filename = 'actionflow.ics'
     content = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
       'PRODID:-//ActionFlow AI//Demo//EN',
-      ...actions.map(a => [
+      ...acts.map((a: any) => [
         'BEGIN:VEVENT',
         `UID:${a.id}@actionflow.ai`,
-        `DTSTAMP:${exportRow.generated_at_utc}`,
+        `DTSTAMP:${new Date().toISOString()}`,
         `SUMMARY:${a.title}`,
         a.due_utc ? `DTSTART:${a.due_utc.replace(/[-:]/g, '')}00Z` : '',
         `DESCRIPTION:Source: ${a.source_span || ''}\\nAmbiguity: ${a.ambiguity || 'none'}`,
@@ -171,35 +194,17 @@ app.post('/api/export', (req: Request, res: Response) => {
     content = [
       '# ActionFlow AI — Approved Task Checklist (demo)',
       '',
-      ...actions.map(a => `- [ ] ${a.title}` + (a.due_utc ? ` (due ${a.due_utc})` : ''))
+      ...acts.map((a: any) => `- [ ] ${a.title}` + (a.due_utc ? ` (due ${a.due_utc})` : ''))
     ].join('\n')
   }
 
-  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
-  res.setHeader('Content-Type', output_type === 'ics' ? 'text/calendar' : 'text/markdown')
+  res.set('Content-Disposition', `attachment; filename="${filename}"`)
+  res.set('Content-Type', output_type === 'ics' ? 'text/calendar' : 'text/markdown')
   res.send(content)
 })
 
-app.get('/api/samples', (_req: Request, res: Response) => {
-  res.json([
-    { id: 'sample-1', title: 'Interview invitation', text: 'You are invited to interview for the Product Engineer role on Friday, November 20 at 2:00pm EST. Please bring a photo ID.' },
-    { id: 'sample-2', title: 'Library notice', text: 'Your book is due on 11/25/2026. Please return or renew it before the due date to avoid fines.' },
-    { id: 'sample-3', title: 'Dentist reminder', text: 'Dentist appointment with Dr. Lee on Tuesday, December 2 at 10:30am. Please arrive 15 minutes early.' }
-  ])
-})
-
-app.use((_req: Request, res: Response) => {
-  res.status(404).json({ error: 'not found' })
-})
-app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-  console.error(err)
-  res.status(500).json({ error: 'internal server error' })
-})
-
-initDb()
-
-app.listen(PORT, () => {
-  console.log(`ActionFlow API listening on :${PORT} (ai=${ai.provider}, demo=${ai.isDemo})`)
+app.listen(4003, () => {
+  console.log('ActionFlow API listening on http://localhost:4003')
 })
 
 export default app
