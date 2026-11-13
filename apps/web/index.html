@@ -162,19 +162,31 @@
 
         const onExport = async (type) => {
           const approvedIds = actions.filter(a => a.approved).map(a => a.id);
-          if (approvedIds.length === 0) return alert('No approved actions');
+          if (approvedIds.length === 0) { setError('Approve at least one action before exporting.'); return; }
+          setError(null);
+          try {
           const res = await fetch(`${API_BASE}/api/export`, {
             method: 'POST',
             headers: sessionHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ request_id: extraction.request_id, action_ids: approvedIds, output_type: type })
           });
           adoptSession(res);
+          if (!res.ok) {
+            let detail = '';
+            try { const j = await res.json(); detail = j.error || ''; } catch (e) {}
+            throw new Error(`${res.status} ${detail || res.statusText} (export)`);
+          }
           const blob = await res.blob();
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
           a.download = type === 'ics' ? 'actionflow.ics' : 'actionflow.md';
+          // The anchor must be in the document for the download to fire reliably.
+          document.body.appendChild(a);
           a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 10000);
+          } catch (e) { setError(String(e.message || e)); }
         };
 
         if (step === 'samples') {
