@@ -118,12 +118,10 @@
             formData.append('processing_consent', String(consent));
             formData.append('source_type', file ? 'upload' : 'paste');
 
-            const res = await fetch(`${API_BASE}/api/extract`, {
-              method: 'POST',
-              body: formData
-            });
-            if (!res.ok) throw new Error(`API extract: ${res.status}`);
-            const result = await res.json();
+            // Must go through api() so the anonymous session header is attached;
+            // otherwise the extracted records belong to a different session and
+            // validate/approve cannot find them.
+            const result = await api('/api/extract', { method: 'POST', body: formData });
             setExtraction(result);
             setActions(result.actions);
             setStep('review');
@@ -167,8 +165,10 @@
           if (approvedIds.length === 0) return alert('No approved actions');
           const res = await fetch(`${API_BASE}/api/export`, {
             method: 'POST',
+            headers: sessionHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ request_id: extraction.request_id, action_ids: approvedIds, output_type: type })
           });
+          adoptSession(res);
           const blob = await res.blob();
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
