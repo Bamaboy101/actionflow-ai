@@ -1,0 +1,11 @@
+name = "actionflow-api"
+main = "apps/api/src/index.ts"
+compatibility_date = "2026-11-13"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "actionflow-db"
+database_id = "be1f6058-25d3-4c8f-b4f3-1b2e39868647"
+
+[vars]
+MODE = "demo"
