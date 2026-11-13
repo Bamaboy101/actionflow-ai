@@ -11,7 +11,10 @@
       "name": "Document Webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 1,
-      "position": [240, 100]
+      "position": [
+        240,
+        100
+      ]
     },
     {
       "parameters": {
@@ -23,7 +26,10 @@
       "name": "Send to ActionFlow",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 1,
-      "position": [460, 100]
+      "position": [
+        460,
+        100
+      ]
     },
     {
       "parameters": {
@@ -43,7 +49,10 @@
       "name": "Has Actions?",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 1,
-      "position": [640, 100]
+      "position": [
+        640,
+        100
+      ]
     },
     {
       "parameters": {
@@ -54,7 +63,10 @@
       "name": "Notify Reviewer",
       "type": "n8n-nodes-base.sendEmail",
       "typeVersion": 1,
-      "position": [840, 100],
+      "position": [
+        840,
+        100
+      ],
       "credentials": {
         "smtp": "smtp-credentials"
       }
@@ -100,6 +112,5 @@
   "versionId": "1",
   "triggerCount": 0,
   "updatedAt": "2026-11-13T00:00:00Z",
-  "createdAt": "2026-11-12T00:00:00Z",
-  "versionId": "1"
+  "createdAt": "2026-11-12T00:00:00Z"
 }
