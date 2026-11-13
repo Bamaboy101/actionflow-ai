@@ -30,3 +30,14 @@ describe('deterministic extraction', () => {
     expect(out.actions.length).toBe(0)
   })
 })
+
+describe('time extraction precision', () => {
+  it('does not mistake a day-of-month for an hour', () => {
+    const out = parseInput('Please attend the review meeting on Friday, November 20 at 2:00pm EST. Bring a photo ID.')
+    expect(out.actions.length).toBeGreaterThan(0)
+    const span = out.actions[0].source_span
+    expect(span).toContain('2:00pm')
+    expect(span).not.toMatch(/November 20 20/)
+    expect(out.actions[0].timezone).toBe('EST')
+  })
+})

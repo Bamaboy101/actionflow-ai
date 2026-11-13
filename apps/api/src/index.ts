@@ -29,7 +29,7 @@ const samples: Sample[] = [
   { id: 'sample-3', title: 'Dentist reminder', text: 'Dentist appointment with Dr. Lee on Tuesday, December 2 at 10:30am. Please arrive 15 minutes early.' },
 ]
 
-function extractDeterministic(text: string): { actions: any[]; parties: string[]; requirements: string[]; summary: string } {
+export function extractDeterministic(text: string): { actions: any[]; parties: string[]; requirements: string[]; summary: string } {
   const actItems: any[] = []
   const parties: string[] = []
   const requirements: string[] = []
@@ -48,7 +48,9 @@ function extractDeterministic(text: string): { actions: any[]; parties: string[]
     if (m) { foundSpan = m[0]; break }
   }
 
-  const timeM = text.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i)
+  // Only treat a number as a time when it carries :minutes or an am/pm marker,
+  // otherwise the day-of-month in "November 20" is mistaken for an hour.
+  const timeM = text.match(/\b(\d{1,2})(?::(\d{2}))\s*(am|pm)?\b/i) || text.match(/\b(\d{1,2})\s*(am|pm)\b/i)
   if (timeM) foundSpan = foundSpan ? foundSpan + ' ' + timeM[0] : timeM[0]
 
   const tzM = text.match(/\b(UTC|EST|EDT|PST|PDT|GMT|BST|IST|CET|CEST)\b/)
