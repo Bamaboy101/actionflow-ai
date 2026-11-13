@@ -211,22 +211,22 @@
                 React.createElement('div', { className: 'mt-8 pt-6 border-t' }),
                 React.createElement('div', { className: 'block text-left' },
                   React.createElement('textarea', {
-                    className: 'w-full p-4 border rounded-lg font-mono text-sm',
-                    rows: 8,
+                    className: 'w-full p-4 border rounded-lg font-mono text-sm resize-y',
+                    rows: 6,
                     placeholder: 'Paste email, notice, or document text here...',
                     value: sourceText,
                     onChange: (e) => setSourceText(e.target.value)
                   })
                 ),
-                React.createElement('div', { className: 'mt-6 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center relative z-10 text-left' },
+                React.createElement('div', { className: 'mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3 items-center relative z-10 text-left bg-white' },
                   React.createElement('label', { className: 'flex items-center gap-2' },
-                    React.createElement('input', { type: 'file', accept: '.pdf', onChange: onFileChange }),
+                    React.createElement('input', { type: 'file', accept: '.pdf', className: 'w-full text-sm', onChange: onFileChange }),
                     file && React.createElement('span', { className: 'text-sm text-gray-600' }, file.name)
                   ),
                   React.createElement('button', {
                     onClick: onExtract,
                     disabled: loading || !consent || (!sourceText && !file),
-                    className: 'flex-1 py-3 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50'
+                    className: 'w-full py-3 px-4 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50'
                   }, loading ? 'Extracting...' : 'Extract Actions'),
                   React.createElement('label', { className: 'flex items-center gap-2 text-sm cursor-pointer select-none py-2' },
                     React.createElement('input', { type: 'checkbox', 'data-testid': 'consent', className: 'w-5 h-5 shrink-0', checked: consent, onChange: (e) => setConsent(e.target.checked) }),
